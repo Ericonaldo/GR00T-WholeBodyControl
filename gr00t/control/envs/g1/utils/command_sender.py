@@ -144,3 +144,56 @@ class HandCommandSender:
             self.cmd.motor_cmd[i].kd = self.kd[i]
 
         self.cmd_pub.Write(self.cmd)
+
+
+class InspireHandCommandSender:
+    """
+    Command sender for Unitree Inspire Hand (G1 robot)
+
+    Publishes to "rt/inspire/cmd" using MotorCmds_ message.
+    The Inspire Hand has 12 motors total:
+    - Motors 0-5: Right hand [pinky, ring, middle, index, thumb_bend, thumb_rotation]
+    - Motors 6-11: Left hand [pinky, ring, middle, index, thumb_bend, thumb_rotation]
+
+    Position control range: [0, 1] where 0=close, 1=open
+    """
+    def __init__(self, is_left: bool = True):
+        from unitree_sdk2py.idl.default import unitree_go_msg_dds__MotorCmd_
+        from unitree_sdk2py.idl.unitree_go.msg.dds_ import MotorCmds_
+
+        self.is_left = is_left
+        self.cmd_pub = ChannelPublisher("rt/inspire/cmd", MotorCmds_)
+        self.cmd_pub.Init()
+
+        # Create command message for all 12 motors
+        self.cmd = MotorCmds_()
+        for _ in range(12):
+            self.cmd.cmds.append(unitree_go_msg_dds__MotorCmd_())
+
+        self.hand_dof = 6  # 6 DOF per hand
+
+    def send_command(self, cmd: np.ndarray):
+        """
+        Send command to the hand
+
+        Args:
+            cmd: np.ndarray of shape (6,) with normalized positions [0, 1]
+                 0 = close, 1 = open
+        """
+        if len(cmd) != self.hand_dof:
+            raise ValueError(f"Command must have {self.hand_dof} elements, got {len(cmd)}")
+
+        # Determine motor indices based on which hand
+        if self.is_left:
+            motor_indices = range(6, 12)  # Left hand: motors 6-11
+        else:
+            motor_indices = range(0, 6)   # Right hand: motors 0-5
+
+        # Set command for each motor
+        for i, motor_idx in enumerate(motor_indices):
+            # Clip to valid range [0, 1]
+            target_pos = float(np.clip(cmd[i], 0.0, 1.0))
+            self.cmd.cmds[motor_idx].q = target_pos
+
+        # Publish command
+        self.cmd_pub.Write(self.cmd)

@@ -141,3 +141,64 @@ class HandStateProcessor:
             .reshape(1, -1)
         )
         return state_data
+
+
+class InspireHandStateProcessor:
+    """
+    State processor for Unitree Inspire Hand (G1 robot)
+
+    Subscribes to "rt/inspire/state" and processes MotorStates_ message.
+    The Inspire Hand has 12 motors total:
+    - Motors 0-5: Right hand [pinky, ring, middle, index, thumb_bend, thumb_rotation]
+    - Motors 6-11: Left hand [pinky, ring, middle, index, thumb_bend, thumb_rotation]
+    """
+    def __init__(self, is_left: bool = True):
+        from unitree_sdk2py.idl.unitree_go.msg.dds_ import MotorStates_
+
+        self.is_left = is_left
+        self.state_sub = ChannelSubscriber("rt/inspire/state", MotorStates_)
+        self.state_sub.Init(None, 0)
+        self.state = None
+        self.num_dof = 6  # Inspire hand has 6 DOF per hand
+
+    def _prepare_low_state(self) -> np.ndarray:
+        """
+        Prepare low-level state for the hand
+
+        Returns:
+            np.ndarray: Shape (1, 18) containing [q(6), dq(6), tau_est(6)]
+        """
+        self.state = self.state_sub.Read()
+
+        if not self.state:
+            print("No Inspire hand state received")
+            return np.zeros((1, 18), dtype=np.float32)
+
+        # Determine motor indices based on which hand
+        if self.is_left:
+            motor_indices = range(6, 12)  # Left hand: motors 6-11
+        else:
+            motor_indices = range(0, 6)   # Right hand: motors 0-5
+
+        # Extract state data
+        q = []
+        dq = []
+        tau_est = []
+
+        for motor_idx in motor_indices:
+            if self.state.states[motor_idx] is not None:
+                q.append(self.state.states[motor_idx].q)
+                dq.append(self.state.states[motor_idx].dq)
+                tau_est.append(self.state.states[motor_idx].tau_est)
+            else:
+                q.append(0.0)
+                dq.append(0.0)
+                tau_est.append(0.0)
+
+        state_data = (
+            np.concatenate([q, dq, tau_est], axis=0)
+            .astype(np.float32)
+            .reshape(1, -1)
+        )
+        # Shape: (1, 18) = (1, 6+6+6)
+        return state_data
